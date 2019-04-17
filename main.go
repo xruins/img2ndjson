@@ -1,17 +1,28 @@
 package main
 
 import (
-	"bytes"
 	sha256 "crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 )
+
+var imageExtentions = []string{"jpg", "jpeg", "gif", "png", "bmp", "webp"}
+
+func hasImageExtention(filePath string) bool {
+	for _, ext := range imageExtentions {
+		if strings.HasSuffix(ext, filePath) {
+			return true
+		}
+	}
+	return false
+}
 
 // Image represents contents and properties of images
 type Image struct {
@@ -48,6 +59,9 @@ func main() {
 	}
 	chann := walk(location)
 	for file := range chann {
+		// if !hasImageExtention(file) {
+		// 	continue
+		// }
 		out := make(chan []byte)
 		go func(file string) {
 			fmt.Fprintf(os.Stderr, "start marshalization: %s\n", file)
@@ -86,20 +100,21 @@ func marshalImage(filePath string) (*Image, error) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	b64 := make(chan []byte)
-	go func(b []byte) {
-		defer close(b64)
-		var res []byte
-		b64r := bytes.NewBuffer(res)
-		base64.NewEncoder(base64.StdEncoding, b64r)
-		b64 <- res
-	}(b)
-
-	wg.Add(1)
 	hash := make(chan [sha256.Size]byte)
 	go func(b []byte) {
 		defer close(hash)
+		defer wg.Done()
 		hash <- sha256.Sum256(b)
+	}(b)
+
+	wg.Add(1)
+	b64 := make(chan []byte)
+	go func(b []byte) {
+		defer close(b64)
+		defer wg.Done()
+		res := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
+		base64.StdEncoding.Encode(res, b)
+		b64 <- res
 	}(b)
 
 	img := &Image{Path: filePath}
